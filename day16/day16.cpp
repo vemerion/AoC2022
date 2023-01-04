@@ -7,41 +7,85 @@
 #include <numeric>
 
 struct Valve {
-  std::string id;
   unsigned pressure;
-  std::vector<std::string> adjacent;
+  std::map<unsigned, unsigned> connections;
 };
 
-using Cave = std::map<std::string, Valve>;
+using Cave = std::map<unsigned, Valve>;
 
 std::istream& operator>>(std::istream& is, Cave& cave) {
   std::string unused;
 
+  struct Node {
+    std::string name;
+    unsigned id;
+    unsigned pressure;
+    std::vector<std::string> adjacent;
+  };
+  std::map<std::string, Node> nodes;
+
   while (!is.eof() && is.peek() != EOF) {
-    Valve valve;
+    Node node;
     is.ignore(5);
-    is >> valve.id;
+    is >> node.name;
     is.ignore(15);
-    is >> valve.pressure;
+    is >> node.pressure;
     is >> unused >> unused >> unused >> unused >> unused;
 
-    std::string id;
+    std::string name;
     while (is.peek() != '\n' && is.peek() != EOF) {
-      is >> id;
-      valve.adjacent.push_back(id.substr(0, 2));
+      is >> name;
+      node.adjacent.push_back(name.substr(0, 2));
     }
     is.ignore();
-    cave[valve.id] = valve;
+    nodes[node.name] = node;
   }
+
+  // Assign ids
+  unsigned id = 0;
+  for (auto& [name, node] : nodes)
+    node.id = id++;
+
+  // Create caves
+  const auto BFS = [&nodes](const Node& node) -> std::map<unsigned, unsigned> {
+    struct Entry {
+      std::string name;
+      unsigned cost;
+    };
+    std::list<Entry> list{Entry{node.name, 1}};
+    std::set<std::string> visited{node.name};
+    std::map<unsigned, unsigned> result;
+    while (!list.empty()) {
+      const auto [connection, cost] = list.front();
+      list.pop_front();
+
+      for (const auto& name : nodes[connection].adjacent) {
+        if (!visited.count(name)) {
+          visited.insert(name);
+          list.push_back({name, cost + 1});
+          if (nodes[name].pressure != 0)
+            result[nodes[name].id] = cost + 1;
+        }
+      }
+    }
+
+    return result;
+  };
+
+  for (const auto& [name, node] : nodes) {
+    cave[node.id].connections = BFS(node);
+    cave[node.id].pressure = node.pressure;
+  }
+
   return is;
 }
 
 struct Agent {
-  std::string current;
+  unsigned current{};
   unsigned walking{};
 };
 
-void releasePressure(const Cave& cave, std::set<std::string> opened, Agent you, Agent elephant, unsigned time, unsigned pressure, unsigned& best) {
+void releasePressure(const Cave& cave, std::set<unsigned> opened, Agent you, Agent elephant, unsigned time, unsigned pressure, unsigned& best) {
   static const unsigned TOTAL_PRESSURE = std::accumulate(cave.begin(), cave.end(), 0, [](const auto& a, const auto&b) { return a + b.second.pressure; });
   if (pressure + TOTAL_PRESSURE * time <= best) {
     return;
@@ -58,46 +102,26 @@ void releasePressure(const Cave& cave, std::set<std::string> opened, Agent you, 
   if (elephant.walking == 0)
     opened.insert(elephant.current);
 
-  struct Move {
-    const Valve* valve{};
-    const unsigned time{};
-  };
-
-  const auto findPaths = [&cave, &opened](const Agent& agent) -> std::list<Move> {
+  const auto findPaths = [&cave, &opened](const Agent& agent) -> std::map<unsigned, unsigned> {
     if (agent.walking > 0)
-      return {Move{&cave.at(agent.current), agent.walking}};
+      return {{agent.current, agent.walking}};
 
-    std::list<Move> list{Move{&cave.at(agent.current), 1}};
-    std::set<const Valve*> visited{&cave.at(agent.current)};
-    std::list<Move> result;
-    while (!list.empty()) {
-      const auto move = list.front();
-      list.pop_front();
-
-      if (move.valve->pressure != 0 && !opened.count(move.valve->id))
-        result.push_back(move);
-      for (const auto& id : move.valve->adjacent) {
-        if (!visited.count(&cave.at(id))) {
-          visited.insert(&cave.at(id));
-          list.emplace_back(&cave.at(id), move.time + 1);
-        }
-      }
-    }
+    std::map<unsigned, unsigned> result;
+    for (const auto& [id, cost] : cave.at(agent.current).connections)
+      if (!opened.count(id))
+        result[id] = cost;
     return result;
   };
 
-  auto yourPaths = findPaths(you);
-  auto elephantPaths = findPaths(elephant);
-
-  for (const auto& [v1, t1] : yourPaths) {
+  for (const auto& [v1, t1] : findPaths(you)) {
     if (t1 > time)
       continue;
 
-    for (const auto& [v2, t2] : elephantPaths) {
-      if (t2 > time || v1->id == v2->id)
+    for (const auto& [v2, t2] : findPaths(elephant)) {
+      if (t2 > time || v1 == v2)
         continue;
 
-      releasePressure(cave, opened, Agent{v1->id, t1}, Agent{v2->id, t2}, time, pressure, best);
+      releasePressure(cave, opened, Agent{v1, t1}, Agent{v2, t2}, time, pressure, best);
     }
   }
 
@@ -118,7 +142,7 @@ void releasePressure(const Cave& cave, std::set<std::string> opened, Agent you, 
 unsigned part1(const Cave& cave) {
   unsigned best = 0;
 
-  releasePressure(cave, {"AA"}, Agent{"AA", 0}, Agent{"AA", 30}, 30, 0, best);
+  releasePressure(cave, {0}, Agent{0, 0}, Agent{0, 30}, 30, 0, best);
 
   return best;
 }
@@ -126,7 +150,7 @@ unsigned part1(const Cave& cave) {
 unsigned part2(const Cave& cave) {
   unsigned best = 0;
 
-  releasePressure(cave, {"AA"}, Agent{"AA", 0}, Agent{"AA", 0}, 26, 0, best);
+  releasePressure(cave, {0}, Agent{0, 0}, Agent{0, 0}, 26, 0, best);
 
   return best;
 }

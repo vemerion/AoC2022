@@ -1,6 +1,6 @@
 #include <iostream>
 #include <string>
-#include <set>
+#include <unordered_set>
 #include <list>
 #include <array>
 #include <cmath>
@@ -31,7 +31,14 @@ Pos operator+(Pos left, const Pos& right) {
   return left;
 }
 
-using Droplet = std::set<Pos>;
+template<>
+struct std::hash<Pos> {
+  size_t operator()(const Pos& pos) const {
+    return 31 * pos.x + 37 * pos.y + 41 * pos.z;
+  }
+};
+
+using Droplet = std::unordered_set<Pos>;
 
 std::istream& operator>>(std::istream& is, Droplet& droplet) {
   Pos pos;
@@ -61,19 +68,20 @@ unsigned surfaceArea(const Droplet& droplet) {
 unsigned exteriorSurface(const Droplet& droplet) {
   static constexpr std::array<Pos, 6> OFFSETS{Pos{-1, 0, 0}, Pos{1, 0, 0}, Pos{0, -1, 0}, Pos{0, 1, 0}, Pos{0, 0, -1}, Pos{0, 0, 1}};
 
-  const auto isOutside = [&droplet](const Pos& start, unsigned max) -> bool {
+  const auto findOutside = [&droplet](const Pos& start, unsigned max) -> std::unordered_set<Pos> {
     if (droplet.count(start))
-      return false;
+      return {};
 
     std::list<Pos> list{start};
-    std::set<Pos> visited{start};
+    std::unordered_set<Pos> visited{start};
 
     while (!list.empty()) {
       const auto pos = list.front();
       list.pop_front();
 
-      if (visited.size() > max)
-        return true;
+      if (visited.size() > max) {
+        return visited;
+      }
 
       for (const auto& offset : OFFSETS) {
         if (const Pos p = pos + offset; !droplet.count(p) && !visited.count(p)) {
@@ -83,17 +91,25 @@ unsigned exteriorSurface(const Droplet& droplet) {
       }
     }
 
-    return false;
+    return {};
   };
 
   unsigned maxSide = std::sqrt(droplet.size() / 6);
   unsigned maxVolume = maxSide * maxSide * maxSide;
 
   unsigned count = 0;
+  std::unordered_set<Pos> outside;
 
   for (const auto& pos : droplet) {
     for (const auto& offset : OFFSETS) {
-      count += isOutside(pos + offset, maxVolume);
+      const auto p = pos + offset;
+      if (outside.count(p)) {
+        count++;
+        continue;
+      }
+      auto found = findOutside(p, maxVolume);
+      outside.insert(found.begin(), found.end());
+      count += !found.empty();
     }
   }
 
